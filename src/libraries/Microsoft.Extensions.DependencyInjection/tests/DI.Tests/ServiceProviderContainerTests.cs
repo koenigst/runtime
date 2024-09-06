@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -384,11 +385,17 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
 
             var context = SynchronizationContext.Current;
             var syncContext = Assert.IsType<AsyncTestSyncContext>(context);
-            var innerContext = syncContext.GetType()
-                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
-                .Single(f => f.Name == "innerContext")
-                .GetValue(syncContext);
-            Assert.IsType<MaxConcurrencySyncContext>(innerContext);
+            var innerContext = Assert.IsType<MaxConcurrencySyncContext>(
+                Assert.Single(
+                        syncContext.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic),
+                        f => f.Name == "innerContext")
+                    .GetValue(syncContext));
+            var workerThreads = Assert.IsAssignableFrom<ICollection>(
+                Assert.Single(
+                        innerContext.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic),
+                        f => f.Name == "workerThreads")
+                    .GetValue(innerContext));
+            Assert.Equal(2, workerThreads.Count);
             var sp = CreateServiceProvider(services);
             var task = Task.Run(() =>
             {
@@ -410,7 +417,6 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             bool doesNotHang = await Task.Run(() => task.Wait(TimeSpan.FromSeconds(20)));
             Assert.True(doesNotHang, "!doesNotHang");
 #endif
-
 
             Assert.True(asyncDisposableResource.DisposeAsyncCalled, "!DisposeAsyncCalled");
         }
