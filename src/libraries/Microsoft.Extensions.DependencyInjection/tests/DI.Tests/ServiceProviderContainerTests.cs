@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection.Specification.Fakes;
 using Microsoft.Extensions.DependencyInjection.Tests.Fakes;
 using Microsoft.Extensions.Internal;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Microsoft.Extensions.DependencyInjection.Tests
 {
@@ -372,7 +374,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
         }
 
         [ConditionalFact(typeof(PlatformDetection), nameof(PlatformDetection.IsThreadingSupported))]
-        public void GetAsyncService_DisposeAsyncOnSameThread_ThrowsAndDoesNotHangAndDisposeAsyncGetsCalled()
+        public async Task GetAsyncService_DisposeAsyncOnSameThread_ThrowsAndDoesNotHangAndDisposeAsyncGetsCalled()
         {
             // Arrange
             var services = new ServiceCollection();
@@ -381,10 +383,14 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
                 new DisposeServiceProviderInCtorAsyncDisposable(asyncDisposableResource, sp));
 
             var context = SynchronizationContext.Current;
-            Assert.NotNull(context);
-            Assert.Equal("", context.GetType().Name);
+            var syncContext = Assert.IsType<AsyncTestSyncContext>(context);
+            var innerContext = syncContext.GetType()
+                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(f => f.Name == "innerContext")
+                .GetValue(syncContext);
+            Assert.IsType<MaxConcurrencySyncContext>(innerContext);
             var sp = CreateServiceProvider(services);
-            bool doesNotHang = Task.Run(() =>
+            var task = Task.Run(() =>
             {
                 Assert.Null(SynchronizationContext.Current);
                 SingleThreadedSynchronizationContext.Run(() =>
@@ -396,9 +402,16 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
                         return sp.GetRequiredService<DisposeServiceProviderInCtorAsyncDisposable>();
                     });
                 });
-            }).Wait(TimeSpan.FromSeconds(20));
+            });
 
+#if NET8_0_OR_GREATER
+            await task.WaitAsync(TimeSpan.FromSeconds(20));
+#else
+            bool doesNotHang = await Task.Run(() => task.Wait(TimeSpan.FromSeconds(20)));
             Assert.True(doesNotHang, "!doesNotHang");
+#endif
+
+
             Assert.True(asyncDisposableResource.DisposeAsyncCalled, "!DisposeAsyncCalled");
         }
 

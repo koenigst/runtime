@@ -8,7 +8,7 @@
     <!-- Working directory for test invocation. Results directory can be relative to this. Used by IDEs. -->
     <SolutionDirectory>.\</SolutionDirectory>
     <!-- Degree of parallelization, spawns n test hosts to run tests. -->
-    <MaxCpuCount>$$MAXCPUCOUNT$$</MaxCpuCount>
+    <MaxCpuCount>2</MaxCpuCount>
     <!-- Configures the architecture of test host. -->
     $$TARGETPLATFORM$$
     <!-- If true, an adapter should disable any test case parallelization. -->
@@ -24,6 +24,7 @@
     </EnvironmentVariables>
   </RunConfiguration>
   <xUnit>
+    <MaxParallelThreads>2</MaxParallelThreads>
     <ParallelAlgorithm>aggressive</ParallelAlgorithm>
   </xUnit>
   <LoggerRunSettings>
