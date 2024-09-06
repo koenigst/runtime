@@ -6,6 +6,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,36 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
 {
     public abstract class ServiceProviderContainerTests : DependencyInjectionSpecificationTests
     {
+#if !NET8_0_OR_GREATER
+        static ServiceProviderContainerTests()
+        {
+            Initializer();
+        }
+#endif
+
+#if NET8_0_OR_GREATER
+        //[ModuleInitializer]
+#endif
+        public static void Initializer()
+        {
+            const int count = 2;
+
+            Assert.True(ThreadPool.SetMinThreads(count, count));
+            Assert.True(ThreadPool.SetMaxThreads(count, count));
+
+#if NET8_0_OR_GREATER
+            var wait = new SpinWait();
+            while (ThreadPool.ThreadCount > count)
+            {
+                wait.SpinOnce();
+            }
+#endif
+
+            Assert.True(ThreadPool.SetMaxThreads(10, count));
+            ThreadPool.GetMaxThreads(out int max, out _);
+            Assert.InRange(max, 3, int.MaxValue);
+        }
+
         [Fact]
         public void RethrowOriginalExceptionFromConstructor()
         {
@@ -398,7 +429,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             });
 
 #if NET8_0_OR_GREATER
-            await task.WaitAsync(TimeSpan.FromSeconds(20));
+            await task.WaitAsync(TimeSpan.FromSeconds(2));
 #else
             bool doesNotHang = await Task.Run(() => task.Wait(TimeSpan.FromSeconds(20)));
             Assert.True(doesNotHang, "!doesNotHang");
@@ -483,7 +514,7 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             public DisposeServiceProviderInCtorAsyncDisposable(AsyncDisposable asyncDisposable, IServiceProvider sp)
             {
                 _asyncDisposable = asyncDisposable;
-                (sp as IAsyncDisposable).DisposeAsync();
+                ((IAsyncDisposable)sp).DisposeAsync();
             }
             public async ValueTask DisposeAsync()
             {
