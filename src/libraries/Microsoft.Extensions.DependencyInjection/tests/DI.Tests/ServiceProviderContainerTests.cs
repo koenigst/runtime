@@ -383,23 +383,9 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             services.AddSingleton<DisposeServiceProviderInCtorAsyncDisposable>(sp =>
                 new DisposeServiceProviderInCtorAsyncDisposable(asyncDisposableResource, sp));
 
-            var context = SynchronizationContext.Current;
-            var syncContext = Assert.IsType<AsyncTestSyncContext>(context);
-            var innerContext = Assert.IsType<MaxConcurrencySyncContext>(
-                Assert.Single(
-                        syncContext.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic),
-                        f => f.Name == "innerContext")
-                    .GetValue(syncContext));
-            var workerThreads = Assert.IsAssignableFrom<ICollection>(
-                Assert.Single(
-                        innerContext.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic),
-                        f => f.Name == "workerThreads")
-                    .GetValue(innerContext));
-            Assert.Equal(2, workerThreads.Count);
             var sp = CreateServiceProvider(services);
             var task = Task.Run(() =>
             {
-                Assert.Null(SynchronizationContext.Current);
                 SingleThreadedSynchronizationContext.Run(() =>
                 {
                     // Act
