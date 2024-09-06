@@ -23,6 +23,9 @@
       <XUNIT_HIDE_PASSING_OUTPUT_DIAGNOSTICS>1</XUNIT_HIDE_PASSING_OUTPUT_DIAGNOSTICS>
     </EnvironmentVariables>
   </RunConfiguration>
+  <xUnit>
+    <ParallelAlgorithm>aggressive</ParallelAlgorithm>
+  </xUnit>
   <LoggerRunSettings>
     <Loggers>
       <Logger friendlyName="trx" />

@@ -380,16 +380,20 @@ namespace Microsoft.Extensions.DependencyInjection.Tests
             services.AddSingleton<DisposeServiceProviderInCtorAsyncDisposable>(sp =>
                 new DisposeServiceProviderInCtorAsyncDisposable(asyncDisposableResource, sp));
 
+            var context = SynchronizationContext.Current;
+            Assert.NotNull(context);
+            Assert.Equal("", context.GetType().Name);
             var sp = CreateServiceProvider(services);
             bool doesNotHang = Task.Run(() =>
             {
+                Assert.Null(SynchronizationContext.Current);
                 SingleThreadedSynchronizationContext.Run(() =>
                 {
                     // Act
                     Assert.Throws<ObjectDisposedException>(() =>
                     {
                         // ctor disposes ServiceProvider
-                        var service = sp.GetRequiredService<DisposeServiceProviderInCtorAsyncDisposable>();
+                        return sp.GetRequiredService<DisposeServiceProviderInCtorAsyncDisposable>();
                     });
                 });
             }).Wait(TimeSpan.FromSeconds(20));
