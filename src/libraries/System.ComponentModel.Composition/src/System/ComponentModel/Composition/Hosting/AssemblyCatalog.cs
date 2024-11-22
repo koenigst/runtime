@@ -14,6 +14,29 @@ using Microsoft.Internal;
 namespace System.ComponentModel.Composition.Hosting
 {
     /// <summary>
+    /// The options controlling the behaviour of the <see cref="AssemblyCatalog"/>.
+    /// </summary>
+    public class AssemblyCatalogOptions
+    {
+        /// <summary>
+        /// The default options for the <see cref="AssemblyCatalog"/>.
+        /// </summary>
+        public static AssemblyCatalogOptions Default { get; } = new AssemblyCatalogOptions();
+
+        /// <summary>
+        /// Creates an isolated <see cref="AssemblyLoadContext"/> specific to this
+        /// <see cref="AssemblyCatalog"/>. All assemblies loaded from this catalog will
+        /// share the context.
+        /// </summary>
+        public bool IsolatedAssemblyLoadContext { get; init; }
+
+        /// <summary>
+        /// The options for the underlying <see cref="TypeCatalog"/>.
+        /// </summary>
+        public TypeCatalogOptions TypeOptions { get; init; } = TypeCatalogOptions.Default;
+    }
+
+    /// <summary>
     ///     An immutable ComposablePartCatalog created from a managed code assembly.
     /// </summary>
     /// <remarks>

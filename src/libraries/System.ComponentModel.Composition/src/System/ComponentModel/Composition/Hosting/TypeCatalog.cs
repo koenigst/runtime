@@ -8,8 +8,10 @@ using System.ComponentModel.Composition.ReflectionModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Text;
 using System.Threading;
 using Microsoft.Internal;
@@ -17,6 +19,23 @@ using Microsoft.Internal.Collections;
 
 namespace System.ComponentModel.Composition.Hosting
 {
+    /// <summary>
+    /// The options controlling the behaviour of the <see cref="TypeCatalog"/>.
+    /// </summary>
+    public class TypeCatalogOptions
+    {
+        /// <summary>
+        /// The default options for the <see cref="DirectoryCatalog"/>.
+        /// </summary>
+        public static TypeCatalogOptions Default { get; } = new TypeCatalogOptions();
+
+        /// <summary>
+        /// The <see cref="ReflectionContext"/> a context used by the catalog when
+        /// interpreting the types to inject attributes into the type definition.
+        /// </summary>
+        public ReflectionContext? ReflectionContext { get; init; }
+    }
+
     /// <summary>
     ///     An immutable ComposablePartCatalog created from a type array or a list of managed types.  This class is threadsafe.
     ///     It is Disposable.
