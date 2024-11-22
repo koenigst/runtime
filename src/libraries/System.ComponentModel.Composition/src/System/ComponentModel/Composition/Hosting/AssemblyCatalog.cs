@@ -5,9 +5,9 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition.Primitives;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.IO;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Threading;
 using Microsoft.Internal;
 
@@ -24,7 +24,7 @@ namespace System.ComponentModel.Composition.Hosting
     {
         private readonly object _thisLock = new object();
         private readonly ICompositionElement _definitionOrigin;
-        private volatile Assembly _assembly;
+        private readonly Assembly _assembly;
         private volatile ComposablePartCatalog? _innerCatalog;
         private int _isDisposed;
 
@@ -71,11 +71,8 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase)
+            : this(codeBase, null, null, null)
         {
-            Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
-
-            InitializeAssemblyCatalog(LoadAssembly(codeBase));
-            _definitionOrigin = this;
         }
 
         /// <summary>
@@ -127,13 +124,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ReflectionContext reflectionContext)
+            : this(codeBase, reflectionContext, null, null)
         {
-            Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
-
-            InitializeAssemblyCatalog(LoadAssembly(codeBase));
-            _reflectionContext = reflectionContext;
-            _definitionOrigin = this;
         }
 
         /// <summary>
@@ -184,12 +177,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ICompositionElement definitionOrigin)
+            : this(codeBase, null, definitionOrigin, null)
         {
-            Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
-
-            InitializeAssemblyCatalog(LoadAssembly(codeBase));
-            _definitionOrigin = definitionOrigin;
         }
 
         /// <summary>
@@ -248,14 +238,73 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ReflectionContext reflectionContext, ICompositionElement definitionOrigin)
+            : this(codeBase, reflectionContext, definitionOrigin, null)
         {
-            Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
+        }
 
-            InitializeAssemblyCatalog(LoadAssembly(codeBase));
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="AssemblyCatalog"/> class
+        ///     with the specified code base.
+        /// </summary>
+        /// <param name="codeBase">
+        ///     A <see cref="string"/> containing the code base of the assembly containing the
+        ///     attributed <see cref="Type"/> objects to add to the <see cref="AssemblyCatalog"/>.
+        /// </param>
+        /// <param name="reflectionContext">
+        ///     The <see cref="ReflectionContext"/> a context used by the catalog when
+        ///     interpreting the types to inject attributes into the type definition<see cref="AssemblyCatalog"/>.
+        /// </param>
+        /// <param name="definitionOrigin">
+        ///     The <see cref="ICompositionElement"/> CompositionElement used by Diagnostics to identify the source for parts.
+        /// </param>
+        /// <param name="assemblyLoadContext">
+        ///     The <see cref="AssemblyLoadContext"/> used to load the assembly.
+        /// </param>
+        /// <exception cref="ArgumentNullException">
+        ///     <paramref name="codeBase"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="ArgumentException">
+        ///     <paramref name="codeBase"/> is a zero-length string, contains only white space,
+        ///     or contains one or more invalid characters. />.
+        /// </exception>
+        /// <exception cref="PathTooLongException">
+        ///     The specified path, file name, or both exceed the system-defined maximum length.
+        /// </exception>
+        /// <exception cref="System.Security.SecurityException">
+        ///     The caller does not have path discovery permission.
+        /// </exception>
+        /// <exception cref="FileNotFoundException">
+        ///     <paramref name="codeBase"/> is not found.
+        /// </exception>
+        /// <exception cref="FileLoadException ">
+        ///     <paramref name="codeBase"/> could not be loaded.
+        ///     <para>
+        ///         -or-
+        ///     </para>
+        ///     <paramref name="codeBase"/> specified a directory.
+        /// </exception>
+        /// <exception cref="BadImageFormatException">
+        ///     <paramref name="codeBase"/> is not a valid assembly
+        ///     -or-
+        ///     Version 2.0 or later of the common language runtime is currently loaded
+        ///     and <paramref name="codeBase"/> was compiled with a later version.
+        /// </exception>
+        /// <remarks>
+        ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
+        /// </remarks>
+        public AssemblyCatalog(
+            string codeBase,
+            ReflectionContext? reflectionContext = null,
+            ICompositionElement? definitionOrigin = null,
+            AssemblyLoadContext? assemblyLoadContext = null)
+        {
+            Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
+
             _reflectionContext = reflectionContext;
-            _definitionOrigin = definitionOrigin;
+            _definitionOrigin = definitionOrigin ?? this;
+            _assembly = Check(LoadAssembly(codeBase, assemblyLoadContext));
         }
 
         /// <summary>
@@ -286,7 +335,7 @@ namespace System.ComponentModel.Composition.Hosting
             Requires.NotNull(assembly, nameof(assembly));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
 
-            InitializeAssemblyCatalog(assembly);
+            _assembly = Check(assembly);
             _reflectionContext = reflectionContext;
             _definitionOrigin = this;
         }
@@ -327,7 +376,7 @@ namespace System.ComponentModel.Composition.Hosting
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
 
-            InitializeAssemblyCatalog(assembly);
+            _assembly = Check(assembly);
             _reflectionContext = reflectionContext;
             _definitionOrigin = definitionOrigin;
         }
@@ -351,7 +400,7 @@ namespace System.ComponentModel.Composition.Hosting
         {
             Requires.NotNull(assembly, nameof(assembly));
 
-            InitializeAssemblyCatalog(assembly);
+            _assembly = Check(assembly);
             _definitionOrigin = this;
         }
 
@@ -382,18 +431,18 @@ namespace System.ComponentModel.Composition.Hosting
             Requires.NotNull(assembly, nameof(assembly));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
 
-            InitializeAssemblyCatalog(assembly);
+            _assembly = Check(assembly);
             _definitionOrigin = definitionOrigin;
         }
 
-        [MemberNotNull(nameof(_assembly))]
-        private void InitializeAssemblyCatalog(Assembly assembly)
+        private static Assembly Check(Assembly assembly)
         {
             if (assembly.ReflectionOnly)
             {
                 throw new ArgumentException(SR.Format(SR.Argument_AssemblyReflectionOnly, nameof(assembly)), nameof(assembly));
             }
-            _assembly = assembly;
+
+            return assembly;
         }
 
         /// <summary>
@@ -542,7 +591,7 @@ namespace System.ComponentModel.Composition.Hosting
 
         [UnconditionalSuppressMessage("SingleFile", "IL3000: Avoid accessing Assembly file path when publishing as a single file",
             Justification = "Setting a CodeBase is single file compatible")]
-        private static Assembly LoadAssembly(string codeBase)
+        private static Assembly LoadAssembly(string codeBase, AssemblyLoadContext? context)
         {
             Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
 
@@ -562,12 +611,16 @@ namespace System.ComponentModel.Composition.Hosting
 
             try
             {
-                return Assembly.Load(assemblyName);
+                return context != null
+                    ? context.LoadFromAssemblyName(assemblyName)
+                    : Assembly.Load(assemblyName);
             }
             //fallback attempt issue https://github.com/dotnet/runtime/issues/25177
             catch (FileNotFoundException)
             {
-                return Assembly.LoadFrom(codeBase);
+                return context != null
+                    ? context.LoadFromAssemblyPath(codeBase)
+                    : Assembly.LoadFrom(codeBase);
             }
         }
     }

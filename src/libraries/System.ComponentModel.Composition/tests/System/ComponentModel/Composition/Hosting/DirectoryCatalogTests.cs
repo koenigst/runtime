@@ -353,6 +353,19 @@ namespace System.ComponentModel.Composition
         }
 
         [Fact]
+        public void LoadedFiles_NonStaticallyReferencedAssemblyInSeparateAssemblyLoaderContext()
+        {
+            string testAssembly = "System.ComponentModel.Composition.Noop.Assembly.dll";
+            var directory = TemporaryFileCopier.GetNewTemporaryDirectory();
+            Directory.CreateDirectory(directory);
+            var finalPath = Path.Combine(directory, testAssembly);
+            var sourcePath = Path.Combine(Directory.GetCurrentDirectory(), testAssembly);
+            File.Copy(sourcePath, finalPath);
+            var catalog = new DirectoryCatalog(directory, new DirectoryCatalogOptions { IsolatedAssemblyLoadContext = true, });
+            Assert.NotEmpty(catalog);
+        }
+
+        [Fact]
         public void Constructor_InvalidAssembly_ShouldBeFine()
         {
                 using (File.CreateText(Path.Combine(TemporaryFileCopier.GetNewTemporaryDirectory(), "Test.dll"))) { }

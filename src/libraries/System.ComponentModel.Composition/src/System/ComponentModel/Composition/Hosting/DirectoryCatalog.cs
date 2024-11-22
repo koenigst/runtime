@@ -7,17 +7,50 @@ using System.ComponentModel.Composition.Primitives;
 using System.Composition.Diagnostics;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Runtime.Loader;
+using System.Threading;
 using Microsoft.Internal;
-using Microsoft.Internal.Collections;
 using IOPath = System.IO.Path;
 
 namespace System.ComponentModel.Composition.Hosting
 {
+    /// <summary>
+    /// The options controlling the behaviour of the <see cref="DirectoryCatalog"/>.
+    /// </summary>
+    public class DirectoryCatalogOptions
+    {
+        /// <summary>
+        /// The default options for the <see cref="DirectoryCatalog"/>.
+        /// </summary>
+        public static DirectoryCatalogOptions Default { get; } = new DirectoryCatalogOptions();
+
+        /// <summary>
+        /// Any valid searchPattern that <see cref="Directory.GetFiles(string, string)"/> will accept.
+        /// </summary>
+        public string SearchPattern { get; init; } = "*.dll";
+
+        /// <summary>
+        /// The <see cref="ReflectionContext"/> a context used by the catalog when
+        /// interpreting the types to inject attributes into the type definition.
+        /// </summary>
+        public ReflectionContext? ReflectionContext { get; init; }
+
+        /// <summary>
+        /// The <see cref="ICompositionElement"/> CompositionElement used by Diagnostics to identify the source for parts.
+        /// </summary>
+        public ICompositionElement? DefinitionOrigin { get; init; }
+
+        /// <summary>
+        /// Creates an isolated <see cref="AssemblyLoadContext"/> specific to this
+        /// <see cref="DirectoryCatalog"/>. All assemblies loaded from this catalog will
+        /// share the context.
+        /// </summary>
+        public bool IsolatedAssemblyLoadContext { get; init; }
+    }
+
     [DebuggerTypeProxy(typeof(DirectoryCatalogDebuggerProxy))]
     public partial class DirectoryCatalog : ComposablePartCatalog, INotifyComposablePartCatalogChanged, ICompositionElement
     {
@@ -29,16 +62,14 @@ namespace System.ComponentModel.Composition.Hosting
 #endif
 
         private readonly ReadWriteLock _thisLock = new ReadWriteLock();
-        private readonly ICompositionElement? _definitionOrigin;
+        private readonly DirectoryCatalogOptions _options;
         private ComposablePartCatalogCollection _catalogCollection;
         private Dictionary<string, AssemblyCatalog> _assemblyCatalogs;
         private volatile bool _isDisposed;
         private string _path;
         private string _fullPath;
-        private string _searchPattern;
         private ReadOnlyCollection<string> _loadedFiles;
-
-        private readonly ReflectionContext? _reflectionContext;
+        private volatile AssemblyLoadContext? _assemblyLoadContext;
 
         /// <summary>
         ///     Creates a catalog of <see cref="ComposablePartDefinition"/>s based on all the *.dll files
@@ -70,7 +101,7 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path)
-            : this(path, "*.dll")
+            : this(path, DirectoryCatalogOptions.Default)
         {
         }
 
@@ -109,8 +140,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, ReflectionContext reflectionContext)
-            : this(path, "*.dll", reflectionContext)
+            : this(path, new DirectoryCatalogOptions { ReflectionContext = reflectionContext, })
         {
+            Requires.NotNull(reflectionContext, nameof(reflectionContext));
         }
 
         /// <summary>
@@ -147,8 +179,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, ICompositionElement definitionOrigin)
-            : this(path, "*.dll", definitionOrigin)
+            : this(path, new DirectoryCatalogOptions { DefinitionOrigin = definitionOrigin, })
         {
+            Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
         }
 
         /// <summary>
@@ -190,8 +223,10 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, ReflectionContext reflectionContext, ICompositionElement definitionOrigin)
-            : this(path, "*.dll", reflectionContext, definitionOrigin)
+            : this(path, new DirectoryCatalogOptions { ReflectionContext = reflectionContext, DefinitionOrigin = definitionOrigin, })
         {
+            Requires.NotNull(reflectionContext, nameof(reflectionContext));
+            Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
         }
 
         /// <summary>
@@ -228,12 +263,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, string searchPattern)
+            : this(path, new DirectoryCatalogOptions { SearchPattern = searchPattern, })
         {
-            Requires.NotNullOrEmpty(path, nameof(path));
             Requires.NotNullOrEmpty(searchPattern, nameof(searchPattern));
-
-            _definitionOrigin = this;
-            Initialize(path, searchPattern);
         }
 
         /// <summary>
@@ -272,13 +304,10 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, string searchPattern, ICompositionElement definitionOrigin)
+            : this(path, new DirectoryCatalogOptions { SearchPattern = searchPattern, DefinitionOrigin = definitionOrigin, })
         {
-            Requires.NotNullOrEmpty(path, nameof(path));
             Requires.NotNullOrEmpty(searchPattern, nameof(searchPattern));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
-
-            _definitionOrigin = definitionOrigin;
-            Initialize(path, searchPattern);
         }
 
         /// <summary>
@@ -321,14 +350,10 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, string searchPattern, ReflectionContext reflectionContext)
+            : this(path, new DirectoryCatalogOptions { SearchPattern = searchPattern, ReflectionContext = reflectionContext, })
         {
-            Requires.NotNullOrEmpty(path, nameof(path));
             Requires.NotNullOrEmpty(searchPattern, nameof(searchPattern));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
-
-            _reflectionContext = reflectionContext;
-            _definitionOrigin = this;
-            Initialize(path, searchPattern);
         }
 
         /// <summary>
@@ -375,15 +400,53 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The caller does not have the required permission.
         /// </exception>
         public DirectoryCatalog(string path, string searchPattern, ReflectionContext reflectionContext, ICompositionElement definitionOrigin)
+            : this(path, new DirectoryCatalogOptions { SearchPattern = searchPattern, ReflectionContext = reflectionContext, DefinitionOrigin = definitionOrigin, })
         {
-            Requires.NotNullOrEmpty(path, nameof(path));
             Requires.NotNullOrEmpty(searchPattern, nameof(searchPattern));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
+        }
 
-            _reflectionContext = reflectionContext;
-            _definitionOrigin = definitionOrigin;
-            Initialize(path, searchPattern);
+        /// <summary>
+        ///     Creates a catalog of <see cref="ComposablePartDefinition"/>s based on all the given searchPattern
+        ///     over the files in the given directory path.
+        ///
+        ///     Possible exceptions that can be thrown are any that <see cref="Directory.GetFiles(string, string)"/> or
+        ///     <see cref="Assembly.Load(AssemblyName)"/> can throw.
+        /// </summary>
+        /// <param name="path">
+        ///     Path to the directory to scan for assemblies to add to the catalog.
+        ///     The path needs to be absolute or relative to <see cref="AppDomain.BaseDirectory"/>
+        /// </param>
+        /// <param name="options">
+        ///     The options controlling the behaviour of this catalog.
+        /// </param>
+        /// <exception cref="ArgumentException">
+        ///     If <paramref name="path"/> is a zero-length string, contains only white space, or
+        ///     contains one or more implementation-specific invalid characters.
+        /// </exception>
+        /// <exception cref="ArgumentNullException">
+        ///     <paramref name="path"/> is <see langword="null"/>
+        ///     or <paramref name="options"/> is <see langword="null"/>.
+        /// </exception>
+        /// <exception cref="DirectoryNotFoundException">
+        ///     The specified <paramref name="path"/> is invalid (for example, it is on an unmapped drive).
+        /// </exception>
+        /// <exception cref="PathTooLongException">
+        ///     The specified <paramref name="path"/>, file name, or both exceed the system-defined maximum length.
+        ///     For example, on Windows-based platforms, paths must be less than 248 characters and file names must
+        ///     be less than 260 characters.
+        /// </exception>
+        /// <exception cref="UnauthorizedAccessException">
+        ///     The caller does not have the required permission.
+        /// </exception>
+        public DirectoryCatalog(string path, DirectoryCatalogOptions options)
+        {
+            Requires.NotNullOrEmpty(path, nameof(path));
+            Requires.NotNull(options, nameof(options));
+
+            _options = options;
+            Initialize(path);
         }
 
         /// <summary>
@@ -434,7 +497,28 @@ namespace System.ComponentModel.Composition.Hosting
         {
             get
             {
-                return _searchPattern;
+                return _options.SearchPattern;
+            }
+        }
+
+        private AssemblyLoadContext? AssemblyLoadContext
+        {
+            get
+            {
+                ThrowIfDisposed();
+
+                if (!_options.IsolatedAssemblyLoadContext)
+                {
+                    return null;
+                }
+
+                if (_assemblyLoadContext is { } context)
+                {
+                    return context;
+                }
+
+                Interlocked.CompareExchange(ref _assemblyLoadContext, new AssemblyLoadContext(_fullPath, true), null);
+                return _assemblyLoadContext;
             }
         }
 
@@ -485,6 +569,8 @@ namespace System.ComponentModel.Composition.Hosting
                             {
                                 _thisLock.Dispose();
                             }
+
+                            _assemblyLoadContext?.Unload();
                         }
                     }
                 }
@@ -664,8 +750,8 @@ namespace System.ComponentModel.Composition.Hosting
 
             try
             {
-                return (_reflectionContext != null)
-                    ? new AssemblyCatalog(assemblyFilePath, _reflectionContext, this)
+                return (_options.ReflectionContext != null)
+                    ? new AssemblyCatalog(assemblyFilePath, _options.ReflectionContext, this)
                     : new AssemblyCatalog(assemblyFilePath, this);
             }
             catch (FileNotFoundException ex)
@@ -726,7 +812,7 @@ namespace System.ComponentModel.Composition.Hosting
 
         private string[] GetFiles()
         {
-            string[] files = Directory.GetFiles(_fullPath, _searchPattern);
+            string[] files = Directory.GetFiles(_fullPath, SearchPattern);
 
             if (!IsWindows)
             {
@@ -744,15 +830,13 @@ namespace System.ComponentModel.Composition.Hosting
 
         [MemberNotNull(nameof(_path))]
         [MemberNotNull(nameof(_fullPath))]
-        [MemberNotNull(nameof(_searchPattern))]
         [MemberNotNull(nameof(_assemblyCatalogs))]
         [MemberNotNull(nameof(_catalogCollection))]
         [MemberNotNull(nameof(_loadedFiles))]
-        private void Initialize(string path, string searchPattern)
+        private void Initialize(string path)
         {
             _path = path;
             _fullPath = GetFullPath(path);
-            _searchPattern = searchPattern;
             _assemblyCatalogs = new Dictionary<string, AssemblyCatalog>();
             _catalogCollection = new ComposablePartCatalogCollection(null, null, null);
 
@@ -793,12 +877,9 @@ namespace System.ComponentModel.Composition.Hosting
         /// <summary>
         ///     Gets the composition element from which the directory catalog originated.
         /// </summary>
-        /// <value>
-        ///     This property always returns <see langword="null"/>.
-        /// </value>
         ICompositionElement? ICompositionElement.Origin
         {
-            get { return null; }
+            get { return _options.DefinitionOrigin; }
         }
     }
 }

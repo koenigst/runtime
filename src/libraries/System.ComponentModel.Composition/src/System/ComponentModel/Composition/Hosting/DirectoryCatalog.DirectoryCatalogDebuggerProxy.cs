@@ -36,7 +36,7 @@ namespace System.ComponentModel.Composition.Hosting
             {
                 get
                 {
-                    return _catalog._reflectionContext;
+                    return _catalog._options.ReflectionContext;
                 }
             }
 

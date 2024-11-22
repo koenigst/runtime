@@ -7,6 +7,7 @@ using System.ComponentModel.Composition.Primitives;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.UnitTesting;
 using Xunit;
 
@@ -1054,6 +1055,19 @@ namespace System.ComponentModel.Composition
             var sourcePath = Path.Combine(Directory.GetCurrentDirectory(), testAssembly);
             File.Copy(sourcePath, finalPath);
             var assemblyCatalog = new AssemblyCatalog(finalPath);
+            Assert.NotEmpty(assemblyCatalog);
+        }
+
+        [Fact]
+        public void NonStaticallyReferencedAssemblyInSeparateAssemblyLoaderContext()
+        {
+            string testAssembly = "System.ComponentModel.Composition.Noop.Assembly.dll";
+            var directory = TemporaryFileCopier.GetNewTemporaryDirectory();
+            Directory.CreateDirectory(directory);
+            var finalPath = Path.Combine(directory, testAssembly);
+            var sourcePath = Path.Combine(Directory.GetCurrentDirectory(), testAssembly);
+            File.Copy(sourcePath, finalPath);
+            var assemblyCatalog = new AssemblyCatalog(finalPath, assemblyLoadContext: new AssemblyLoadContext("test1"));
             Assert.NotEmpty(assemblyCatalog);
         }
     }

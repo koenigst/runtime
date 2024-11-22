@@ -267,6 +267,9 @@ namespace System.ComponentModel.Composition.Hosting
         public AssemblyCatalog(string codeBase, System.ComponentModel.Composition.Primitives.ICompositionElement definitionOrigin) { }
         public AssemblyCatalog(string codeBase, System.Reflection.ReflectionContext reflectionContext) { }
         public AssemblyCatalog(string codeBase, System.Reflection.ReflectionContext reflectionContext, System.ComponentModel.Composition.Primitives.ICompositionElement definitionOrigin) { }
+#if NET8_0_OR_GREATER
+        public AssemblyCatalog(string codeBase, System.Reflection.ReflectionContext? reflectionContext, System.ComponentModel.Composition.Primitives.ICompositionElement? definitionOrigin, System.Runtime.Loader.AssemblyLoadContext? assemblyLoadContext) { }
+#endif
         public System.Reflection.Assembly Assembly { get { throw null; } }
         string System.ComponentModel.Composition.Primitives.ICompositionElement.DisplayName { get { throw null; } }
         System.ComponentModel.Composition.Primitives.ICompositionElement? System.ComponentModel.Composition.Primitives.ICompositionElement.Origin { get { throw null; } }
@@ -392,6 +395,16 @@ namespace System.ComponentModel.Composition.Hosting
         public void Dispose() { }
         public void SatisfyImportsOnce(System.ComponentModel.Composition.Primitives.ComposablePart part) { }
     }
+#if NET8_0_OR_GREATER
+    public partial class DirectoryCatalogOptions
+    {
+        public static DirectoryCatalogOptions Default { get { throw null; } }
+        public string SearchPattern { get { throw null; } init { throw null; } }
+        public System.Reflection.ReflectionContext? ReflectionContext { get { throw null; } init { throw null; } }
+        public System.ComponentModel.Composition.Primitives.ICompositionElement? DefinitionOrigin { get { throw null; } init { throw null; } }
+        public bool IsolatedAssemblyLoadContext { get { throw null; } init { throw null; } }
+    }
+#endif
     public partial class DirectoryCatalog : System.ComponentModel.Composition.Primitives.ComposablePartCatalog, System.ComponentModel.Composition.Hosting.INotifyComposablePartCatalogChanged, System.ComponentModel.Composition.Primitives.ICompositionElement
     {
         public DirectoryCatalog(string path) { }
@@ -402,6 +415,9 @@ namespace System.ComponentModel.Composition.Hosting
         public DirectoryCatalog(string path, string searchPattern, System.ComponentModel.Composition.Primitives.ICompositionElement definitionOrigin) { }
         public DirectoryCatalog(string path, string searchPattern, System.Reflection.ReflectionContext reflectionContext) { }
         public DirectoryCatalog(string path, string searchPattern, System.Reflection.ReflectionContext reflectionContext, System.ComponentModel.Composition.Primitives.ICompositionElement definitionOrigin) { }
+#if NET8_0_OR_GREATER
+        public DirectoryCatalog(string path, DirectoryCatalogOptions options) { }
+#endif
         public string FullPath { get { throw null; } }
         public System.Collections.ObjectModel.ReadOnlyCollection<string> LoadedFiles { get { throw null; } }
         public string Path { get { throw null; } }
