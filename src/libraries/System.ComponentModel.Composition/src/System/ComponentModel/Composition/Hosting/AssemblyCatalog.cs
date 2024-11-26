@@ -8,6 +8,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Runtime.Versioning;
 using System.Threading;
 using Microsoft.Internal;
 
@@ -47,11 +48,11 @@ namespace System.ComponentModel.Composition.Hosting
     {
         private readonly object _thisLock = new object();
         private readonly ICompositionElement _definitionOrigin;
+        private readonly AssemblyCatalogOptions _options;
+        private readonly AssemblyLoadContext? _assemblyLoadContext;
         private readonly Assembly _assembly;
         private volatile ComposablePartCatalog? _innerCatalog;
         private int _isDisposed;
-
-        private readonly ReflectionContext? _reflectionContext;
 
         /// <summary>
         ///     Initializes a new instance of the <see cref="AssemblyCatalog"/> class
@@ -94,7 +95,7 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase)
-            : this(codeBase, null, null, null)
+            : this(codeBase, AssemblyCatalogOptions.Default)
         {
         }
 
@@ -147,7 +148,7 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ReflectionContext reflectionContext)
-            : this(codeBase, reflectionContext, null, null)
+            : this(codeBase, CreateOptions(reflectionContext))
         {
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
         }
@@ -200,7 +201,7 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ICompositionElement definitionOrigin)
-            : this(codeBase, null, definitionOrigin, null)
+            : this(codeBase, AssemblyCatalogOptions.Default, definitionOrigin)
         {
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
         }
@@ -261,7 +262,7 @@ namespace System.ComponentModel.Composition.Hosting
         ///     The assembly referenced by <paramref langword="codeBase"/> is loaded into the Load context.
         /// </remarks>
         public AssemblyCatalog(string codeBase, ReflectionContext reflectionContext, ICompositionElement definitionOrigin)
-            : this(codeBase, reflectionContext, definitionOrigin, null)
+            : this(codeBase, CreateOptions(reflectionContext), definitionOrigin)
         {
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
@@ -275,15 +276,11 @@ namespace System.ComponentModel.Composition.Hosting
         ///     A <see cref="string"/> containing the code base of the assembly containing the
         ///     attributed <see cref="Type"/> objects to add to the <see cref="AssemblyCatalog"/>.
         /// </param>
-        /// <param name="reflectionContext">
-        ///     The <see cref="ReflectionContext"/> a context used by the catalog when
-        ///     interpreting the types to inject attributes into the type definition<see cref="AssemblyCatalog"/>.
+        /// <param name="options">
+        ///     The options controlling the behaviour of this catalog.
         /// </param>
         /// <param name="definitionOrigin">
         ///     The <see cref="ICompositionElement"/> CompositionElement used by Diagnostics to identify the source for parts.
-        /// </param>
-        /// <param name="assemblyLoadContext">
-        ///     The <see cref="AssemblyLoadContext"/> used to load the assembly.
         /// </param>
         /// <exception cref="ArgumentNullException">
         ///     <paramref name="codeBase"/> is <see langword="null"/>.
@@ -319,15 +316,20 @@ namespace System.ComponentModel.Composition.Hosting
         /// </remarks>
         public AssemblyCatalog(
             string codeBase,
-            ReflectionContext? reflectionContext = null,
-            ICompositionElement? definitionOrigin = null,
-            AssemblyLoadContext? assemblyLoadContext = null)
+            AssemblyCatalogOptions options,
+            ICompositionElement? definitionOrigin = null)
         {
             Requires.NotNullOrEmpty(codeBase, nameof(codeBase));
 
-            _reflectionContext = reflectionContext;
+            _options = options;
             _definitionOrigin = definitionOrigin ?? this;
-            _assembly = Check(LoadAssembly(codeBase, assemblyLoadContext));
+
+            if (options.IsolatedAssemblyLoadContext)
+            {
+                _assemblyLoadContext = new IsolatedAssemblyLoadContext(codeBase);
+            }
+
+            _assembly = Check(LoadAssembly(codeBase, _assemblyLoadContext));
         }
 
         /// <summary>
@@ -354,13 +356,9 @@ namespace System.ComponentModel.Composition.Hosting
         ///     <paramref name="reflectionContext"/> is <see langword="null"/>.
         /// </exception>
         public AssemblyCatalog(Assembly assembly, ReflectionContext reflectionContext)
+            : this(assembly, CreateOptions(reflectionContext))
         {
-            Requires.NotNull(assembly, nameof(assembly));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
-
-            _assembly = Check(assembly);
-            _reflectionContext = reflectionContext;
-            _definitionOrigin = this;
         }
 
         /// <summary>
@@ -394,14 +392,10 @@ namespace System.ComponentModel.Composition.Hosting
         ///     <paramref name="definitionOrigin"/> is <see langword="null"/>.
         /// </exception>
         public AssemblyCatalog(Assembly assembly, ReflectionContext reflectionContext, ICompositionElement definitionOrigin)
+            : this(assembly, CreateOptions(reflectionContext), definitionOrigin)
         {
-            Requires.NotNull(assembly, nameof(assembly));
             Requires.NotNull(reflectionContext, nameof(reflectionContext));
             Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
-
-            _assembly = Check(assembly);
-            _reflectionContext = reflectionContext;
-            _definitionOrigin = definitionOrigin;
         }
 
         /// <summary>
@@ -420,11 +414,8 @@ namespace System.ComponentModel.Composition.Hosting
         ///     <paramref name="assembly"/> was loaded in the reflection-only context.
         /// </exception>
         public AssemblyCatalog(Assembly assembly)
+            : this(assembly, AssemblyCatalogOptions.Default)
         {
-            Requires.NotNull(assembly, nameof(assembly));
-
-            _assembly = Check(assembly);
-            _definitionOrigin = this;
         }
 
         /// <summary>
@@ -450,12 +441,46 @@ namespace System.ComponentModel.Composition.Hosting
         ///     <paramref name="definitionOrigin"/> is <see langword="null"/>.
         /// </exception>
         public AssemblyCatalog(Assembly assembly, ICompositionElement definitionOrigin)
+            : this(assembly, AssemblyCatalogOptions.Default, definitionOrigin)
+        {
+            Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
+        }
+
+        /// <summary>
+        ///     Initializes a new instance of the <see cref="AssemblyCatalog"/> class
+        ///     with the specified code base.
+        /// </summary>
+        /// <param name="assembly">
+        ///     The <see cref="Assembly"/> containing the attributed <see cref="Type"/> objects to
+        ///     add to the <see cref="AssemblyCatalog"/>.
+        /// </param>
+        /// <param name="options">
+        ///     The options controlling the behaviour of this catalog.
+        /// </param>
+        /// <param name="definitionOrigin">
+        ///     The <see cref="ICompositionElement"/> CompositionElement used by Diagnostics to identify the source for parts.
+        /// </param>
+        /// <exception cref="ArgumentException">
+        ///     <paramref name="assembly"/> is <see langword="null"/>.
+        ///     <para>
+        ///         -or-
+        ///     </para>
+        ///     <paramref name="assembly"/> was loaded in the reflection-only context.
+        ///     <para>
+        ///         -or-
+        ///     </para>
+        ///     <paramref name="definitionOrigin"/> is <see langword="null"/>.
+        /// </exception>
+        public AssemblyCatalog(
+            Assembly assembly,
+            AssemblyCatalogOptions options,
+            ICompositionElement? definitionOrigin = null)
         {
             Requires.NotNull(assembly, nameof(assembly));
-            Requires.NotNull(definitionOrigin, nameof(definitionOrigin));
 
             _assembly = Check(assembly);
-            _definitionOrigin = definitionOrigin;
+            _options = options;
+            _definitionOrigin = definitionOrigin ?? this;
         }
 
         private static Assembly Check(Assembly assembly)
@@ -515,9 +540,7 @@ namespace System.ComponentModel.Composition.Hosting
                     {
                         if (_innerCatalog == null)
                         {
-                            var catalog = (_reflectionContext != null)
-                                ? new TypeCatalog(assembly.GetTypes(), _reflectionContext, _definitionOrigin)
-                                : new TypeCatalog(assembly.GetTypes(), _definitionOrigin);
+                            var catalog = new TypeCatalog(assembly.GetTypes(), _options.TypeOptions, _definitionOrigin);
                             Thread.MemoryBarrier();
                             _innerCatalog = catalog;
                         }
@@ -586,7 +609,17 @@ namespace System.ComponentModel.Composition.Hosting
                 {
                     if (disposing)
                     {
-                        _innerCatalog?.Dispose();
+                        try
+                        {
+                            _innerCatalog?.Dispose();
+                        }
+                        finally
+                        {
+                            if (_assemblyLoadContext?.IsCollectible == true)
+                            {
+                                _assemblyLoadContext.Unload();
+                            }
+                        }
                     }
                 }
             }
@@ -599,6 +632,17 @@ namespace System.ComponentModel.Composition.Hosting
         public override IEnumerator<ComposablePartDefinition> GetEnumerator()
         {
             return InnerCatalog.GetEnumerator();
+        }
+
+        private static AssemblyCatalogOptions CreateOptions(ReflectionContext reflectionContext)
+        {
+            return new AssemblyCatalogOptions()
+            {
+                TypeOptions = new TypeCatalogOptions()
+                {
+                    ReflectionContext = reflectionContext,
+                },
+            };
         }
 
         private void ThrowIfDisposed()
@@ -644,6 +688,26 @@ namespace System.ComponentModel.Composition.Hosting
                 return context != null
                     ? context.LoadFromAssemblyPath(codeBase)
                     : Assembly.LoadFrom(codeBase);
+            }
+        }
+
+        private sealed class IsolatedAssemblyLoadContext(string codeBase)
+            : AssemblyLoadContext($"IsolatedAssemblyLoadContext({codeBase})")
+        {
+            private readonly AssemblyDependencyResolver _resolver = new(codeBase);
+
+            protected override Assembly? Load(AssemblyName assemblyName)
+            {
+                return _resolver.ResolveAssemblyToPath(assemblyName) is { } assemblyPath
+                    ? LoadFromAssemblyPath(assemblyPath)
+                    : null;
+            }
+
+            protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
+            {
+                return _resolver.ResolveUnmanagedDllToPath(unmanagedDllName) is { } libraryPath
+                    ? LoadUnmanagedDllFromPath(libraryPath)
+                    : IntPtr.Zero;
             }
         }
     }
